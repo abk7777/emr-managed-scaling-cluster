@@ -1,0 +1,107 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: EMR cluster with Managed Scaling Policy
+
+Parameters:
+  Stage:
+    Type: String
+    Description: Stage of production
+  AppName:
+    Type: String
+  LogUri:
+    Type: String
+    Description: S3 bucket for EMR logs
+  EmrReleaseLabel:
+    Type: String
+    Description: EMR release label
+    Default: emr-6.8.0
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+
+Resources:
+  EmrScalingInstanceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "ec2.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonElasticMapReduceforEC2Role"
+
+  EmrScalingClusterServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          Effect: Allow
+          Principal:
+            Service:
+              - "elasticmapreduce.amazonaws.com"
+          Action:
+            - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AmazonElasticMapReduceRole"
+      Path: /
+
+  EmrScalingCluster:
+    Type: AWS::EMR::Cluster
+    DeletionPolicy: Delete
+    Properties:
+      Name: !Sub '${Stage}-${AppName}-cluster'
+      JobFlowRole: !Ref EmrScalingInstanceProfile
+      ReleaseLabel: !Ref EmrReleaseLabel
+      LogUri: !Ref LogUri
+      Applications:
+        - Name: Hadoop
+        - Name: Hive
+        - Name: Tez
+        - Name: Hue
+        - Name: Spark
+        - Name: Livy
+        - Name: JupyterHub
+        - Name: JupyterEnterpriseGateway
+      Instances:
+        MasterInstanceGroup:
+          InstanceCount: 1
+          InstanceType: m5.xlarge
+          Market: ON_DEMAND
+          Name: cfnMaster
+        CoreInstanceGroup:
+          InstanceCount: 1
+          InstanceType: r5.xlarge
+          Market: ON_DEMAND
+          Name: cfnCore
+        TaskInstanceGroups:
+          - InstanceCount: 1
+            InstanceType: r5.xlarge
+            Market: ON_DEMAND
+            Name: cfnTask1
+        Ec2SubnetId: !Ref SubnetId
+        Ec2KeyName: !Sub "{{resolve:ssm:/${AppName}/${Stage}/${AWS::Region}/EC2KeyPairName}}"
+      VisibleToAllUsers: true
+      ServiceRole: !Ref EmrScalingClusterServiceRole
+      ManagedScalingPolicy:
+        ComputeLimits:
+          # TODO parameterize MIN_CAPACITY_UNITS
+          MinimumCapacityUnits: 1
+          # TODO parameterize MAX_CAPACITY_UNITS
+          MaximumCapacityUnits: 5
+          # TODO parameterize MAX_ON_DEMAND_CAPACITY_UNITS
+          MaximumOnDemandCapacityUnits: 2
+          UnitType: Instances
+
+  EmrScalingInstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties:
+      Path: /
+      Roles:
+        - Ref: "EmrScalingInstanceRole"
+
+# TODO add outputs
